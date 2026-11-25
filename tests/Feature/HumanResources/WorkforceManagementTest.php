@@ -1,5 +1,6 @@
 <?php
 
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -8,6 +9,9 @@ use Webkul\Contact\Models\Organization;
 use Webkul\HumanResources\Contracts\TimekeepingProvider;
 use Webkul\HumanResources\Models\Employee;
 use Webkul\HumanResources\Models\EmployeeDocument;
+use Webkul\HumanResources\Models\ShiftAssignment;
+use Webkul\HumanResources\Models\WorkSite;
+use Webkul\HumanResources\Services\TimekeepingImporter;
 use Webkul\User\Models\Role;
 use Webkul\User\Models\User;
 
@@ -168,7 +172,7 @@ it('keeps legacy documents private from employee viewers and scoped managers', f
 
 it('imports linked Alterdata marks without duplicating them and rejects incomplete batches', function () {
     $employee = workforceEmployee();
-    $this->actingAs(getDefaultAdmin(), 'user');
+    $this->actingAs(workforceUser(['timekeeping', 'timekeeping.import']), 'user');
     $url = route('admin.human_resources.timekeeping.import');
     $csv = "employee_code;occurred_at;external_id\n{$employee->alterdata_employee_id};2026-11-13 08:00:00;test-mark-1\n";
 
@@ -179,6 +183,10 @@ it('imports linked Alterdata marks without duplicating them and rejects incomple
     expect(DB::table('hr_timekeeping_entries')->where('employee_id', $employee->id)->count())->toBe(1);
     $this->assertDatabaseHas('hr_timekeeping_entries', [
         'employee_id' => $employee->id, 'occurred_at' => '2026-11-13 11:00:00', 'source' => 'alterdata_csv',
+    ]);
+    $this->assertDatabaseHas('hr_timekeeping_batches', [
+        'source' => 'alterdata_csv', 'received' => 1, 'inserted' => 0,
+        'first_mark_at' => '2026-11-13 11:00:00', 'last_mark_at' => '2026-11-13 11:00:00',
     ]);
 
     $bad = $csv."{$employee->alterdata_employee_id};2026-11-13 09:00:00;test-mark-2\nmissing;2026-11-13 09:01:00;test-mark-3\n";
@@ -206,6 +214,37 @@ it('uses the same validated import path for an API provider and refuses to run w
 
     $this->artisan('hr:sync-alterdata-timekeeping', ['from' => '2026-11-13', 'to' => '2026-11-13'])->assertSuccessful();
     $this->assertDatabaseHas('hr_timekeeping_entries', ['employee_id' => $employee->id, 'external_id' => 'api-test-mark', 'source' => 'alterdata_api']);
+});
+
+it('reviews overnight shifts by their start date and filters pending punches', function () {
+    $employee = workforceEmployee();
+    $site = WorkSite::create(['code' => fake()->uuid(), 'name' => 'Posto para conferência', 'status' => 'active']);
+    $shift = ShiftAssignment::create([
+        'employee_id' => $employee->id,
+        'work_site_id' => $site->id,
+        'starts_at' => '2026-11-13 19:00:00',
+        'ends_at' => '2026-11-14 07:00:00',
+        'shift_type' => 'night',
+        'status' => 'completed',
+    ]);
+    $importer = app(TimekeepingImporter::class);
+    $importer->import([['employee_code' => $employee->alterdata_employee_id, 'occurred_at' => '2026-11-13 18:57:00']], 'alterdata_csv');
+    $filters = [
+        'employee_id' => $employee->id, 'work_site_id' => $site->id, 'from' => '2026-11-13', 'to' => '2026-11-13',
+    ];
+    $this->travelTo(Carbon::parse('2026-11-14 10:00:00'));
+    $this->actingAs(workforceUser(['timekeeping', 'human-resources.work-sites', 'human-resources.shifts']), 'user')
+        ->get(route('admin.human_resources.timekeeping.index', $filters + ['punch_status' => 'pending']))
+        ->assertOk()
+        ->assertViewHas('shifts', fn ($shifts) => $shifts->total() === 1 && $shifts->first()['result'] === 'missing_end');
+
+    $importer->import([['employee_code' => $employee->alterdata_employee_id, 'occurred_at' => '2026-11-14 07:05:00']], 'alterdata_csv');
+    $this->get(route('admin.human_resources.timekeeping.index', $filters + ['punch_status' => 'pending']))
+        ->assertOk()->assertViewHas('shifts', fn ($shifts) => $shifts->total() === 0);
+    $this->get(route('admin.human_resources.timekeeping.index', $filters))
+        ->assertOk()->assertViewHas('shifts', fn ($shifts) => $shifts->first()['shift']->is($shift)
+            && $shifts->first()['result'] === 'matched'
+            && $shifts->first()['exit']->time->format('d/m H:i') === '14/11 07:05');
 });
 
 it('enforces separate timekeeping read and import permissions', function () {

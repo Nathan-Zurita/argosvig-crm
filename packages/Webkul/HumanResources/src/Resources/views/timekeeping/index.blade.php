@@ -4,26 +4,21 @@
     <div v-pre class="flex flex-col gap-4">
         <section class="rounded-lg border border-gray-300 bg-white p-4 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200">
             <h1 class="text-xl font-bold">@lang('human_resources::workforce.timekeeping')</h1>
-            <p class="mt-2">@lang('human_resources::workforce.timekeeping_hint')</p>
+            <p class="mt-1 text-sm">@lang('human_resources::timekeeping.intro')</p>
+            <nav class="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm" aria-label="{{ trans('human_resources::workforce.timekeeping') }}">
+                @if ($shifts !== null)
+                    <a href="#jornadas" class="font-medium underline underline-offset-2">@lang('human_resources::timekeeping.daily')</a>
+                @endif
+                <a href="#apuracao" class="font-medium underline underline-offset-2">@lang('human_resources::timekeeping.summary')</a>
+                <a href="#marcacoes" class="font-medium underline underline-offset-2">@lang('human_resources::workforce.marks')</a>
+                <a href="#importacoes" class="font-medium underline underline-offset-2">@lang('human_resources::timekeeping.batches')</a>
+            </nav>
             @include('human_resources::workforce.errors')
-
-            @if (bouncer()->hasPermission('timekeeping.import'))
-                <form method="POST" enctype="multipart/form-data" class="mt-4 flex flex-wrap items-end gap-3" action="{{ route('admin.human_resources.timekeeping.import') }}">
-                    @csrf
-                    <label>
-                        @lang('human_resources::workforce.csv_file')
-                        <input type="file" name="file" accept=".csv" required class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-800 dark:border-gray-800 dark:bg-gray-950 dark:text-white">
-                    </label>
-                    <button type="submit" class="primary-button">@lang('human_resources::workforce.import')</button>
-                    <a class="secondary-button" href="{{ route('admin.human_resources.timekeeping.template') }}">@lang('human_resources::workforce.template')</a>
-                </form>
-                <p class="mt-2 text-sm">@lang('human_resources::workforce.csv_hint')</p>
-            @endif
         </section>
 
         <section class="rounded-lg border border-gray-300 bg-white p-4 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200">
-            <h2 class="mb-3 font-bold">@lang('human_resources::workforce.marks')</h2>
-            <form method="GET" class="mb-4 flex flex-wrap items-end gap-3">
+            <h2 class="mb-3 font-bold">@lang('human_resources::timekeeping.filters')</h2>
+            <form method="GET" class="flex flex-wrap items-end gap-3">
                 <label>
                     @lang('human_resources::app.menu.employees')
                     <select data-searchable name="employee_id" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-800 dark:border-gray-800 dark:bg-gray-950 dark:text-white">
@@ -35,9 +30,46 @@
                 </label>
                 <label>@lang('human_resources::workforce.from') <input name="from" type="date" value="{{ $from->toDateString() }}" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-800 dark:border-gray-800 dark:bg-gray-950 dark:text-white"></label>
                 <label>@lang('human_resources::workforce.to') <input name="to" type="date" value="{{ $to->toDateString() }}" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-800 dark:border-gray-800 dark:bg-gray-950 dark:text-white"></label>
+                @if ($shifts !== null)
+                    <label>
+                        @lang('human_resources::timekeeping.site')
+                        <select data-searchable name="work_site_id" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-800 dark:border-gray-800 dark:bg-gray-950 dark:text-white">
+                            <option value="">@lang('human_resources::workforce.all')</option>
+                            @foreach ($sites as $site)
+                                <option value="{{ $site->id }}" @selected((string) request('work_site_id') === (string) $site->id)>{{ $site->name }}</option>
+                            @endforeach
+                        </select>
+                    </label>
+                    <label>
+                        @lang('human_resources::timekeeping.status')
+                        <select name="punch_status" class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-800 dark:border-gray-800 dark:bg-gray-950 dark:text-white">
+                            <option value="">@lang('human_resources::workforce.all')</option>
+                            @foreach (['pending', ...$statuses] as $status)
+                                <option value="{{ $status }}" @selected(request('punch_status') === $status)>@lang("human_resources::timekeeping.$status")</option>
+                            @endforeach
+                        </select>
+                    </label>
+                @endif
                 <button class="primary-button" type="submit">@lang('human_resources::workforce.filter')</button>
-                <a class="secondary-button" href="{{ route('admin.human_resources.timekeeping.export', request()->only(['employee_id', 'from', 'to'])) }}">@lang('human_resources::workforce.export')</a>
+                @if (request()->anyFilled(['employee_id', 'from', 'to', 'work_site_id', 'punch_status']))
+                    <a class="secondary-button" href="{{ route('admin.human_resources.timekeeping.index') }}">@lang('human_resources::timekeeping.clear')</a>
+                @endif
             </form>
+            @if ($shifts !== null)
+                <p class="mt-2 text-sm">@lang('human_resources::timekeeping.shift_filters')</p>
+            @endif
+        </section>
+
+        @if ($shifts !== null)
+            @include('human_resources::timekeeping.journeys')
+        @endif
+        @include('human_resources::timekeeping.summary')
+
+        <section id="marcacoes" style="scroll-margin-top: 5rem" class="rounded-lg border border-gray-300 bg-white p-4 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200">
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <h2 class="font-bold">@lang('human_resources::workforce.marks') <span class="ms-2 text-sm font-normal tabular-nums">{{ $entries->total() }}</span></h2>
+                <a class="secondary-button" href="{{ route('admin.human_resources.timekeeping.export', request()->only(['employee_id', 'from', 'to'])) }}">@lang('human_resources::workforce.export')</a>
+            </div>
             <div class="overflow-x-auto">
                 <table class="w-full text-left text-sm">
                     <thead><tr>
@@ -60,18 +92,9 @@
                     </tbody>
                 </table>
             </div>
-            @include('human_resources::workforce.pagination', ['page' => $entries])
+            @include('human_resources::workforce.pagination', ['page' => $entries->fragment('marcacoes')])
         </section>
 
-        <section class="rounded-lg border border-gray-300 bg-white p-4 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200">
-            <h2 class="mb-3 font-bold">@lang('human_resources::workforce.recent_imports')</h2>
-            <ul class="space-y-2">
-                @forelse ($batches as $batch)
-                    <li>{{ \Illuminate\Support\Carbon::parse($batch->created_at)->format('d/m/Y H:i') }} · @lang("human_resources::workforce.sources.{$batch->source}") · @lang('human_resources::workforce.imported', ['inserted' => $batch->inserted, 'duplicates' => $batch->received - $batch->inserted])</li>
-                @empty
-                    <li>@lang('human_resources::workforce.no_history')</li>
-                @endforelse
-            </ul>
-        </section>
+        @include('human_resources::timekeeping.imports')
     </div>
 </x-admin::layouts>

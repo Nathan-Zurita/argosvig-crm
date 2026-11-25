@@ -3,7 +3,6 @@
 namespace Webkul\HumanResources\Services;
 
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Webkul\HumanResources\Models\WorkSite;
 use Webkul\HumanResources\Repositories\EmployeeDocumentRepository;
 use Webkul\HumanResources\Repositories\ServiceContractRepository;
@@ -15,6 +14,7 @@ class WorkforceReview
         private ShiftAssignmentRepository $shifts,
         private EmployeeDocumentRepository $documents,
         private ServiceContractRepository $contracts,
+        private TimekeepingShiftMatch $timekeeping,
     ) {}
 
     public function review(?WorkSite $site, Carbon $from, Carbon $to, ?int $contractId = null): array
@@ -29,30 +29,8 @@ class WorkforceReview
                 ->orderByDesc('ends_at')->orderByDesc('id')
                 ->paginate(15, ['id', 'work_site_id', 'employee_id', 'starts_at', 'ends_at'], 'punches')->withQueryString();
 
-            $rows = $punches->getCollection();
-
-            if ($rows->isNotEmpty()) {
-                $first = $rows->min('starts_at')->copy()->subMinutes(30)->utc();
-                $last = $rows->max('ends_at')->copy()->addMinutes(30)->utc();
-                $marks = DB::table('hr_timekeeping_entries')->whereIn('employee_id', $rows->pluck('employee_id')->unique())
-                    ->whereBetween('occurred_at', [$first, $last])->get(['employee_id', 'occurred_at'])->groupBy('employee_id');
-
-                $punches->through(function ($shift) use ($marks) {
-                    $times = collect($marks->get($shift->employee_id, []))->map(fn ($mark) => Carbon::parse($mark->occurred_at, 'UTC')->timestamp);
-                    $matches = fn (Carbon $edge) => $times->filter(fn ($time) => abs($time - $edge->timestamp) <= 1800)->values();
-                    $entry = $matches($shift->starts_at);
-                    $exit = $matches($shift->ends_at);
-                    $result = match (true) {
-                        $entry->isEmpty() && $exit->isEmpty() => 'missing_both',
-                        $entry->isEmpty() => 'missing_start',
-                        $exit->isEmpty() => 'missing_end',
-                        $entry->merge($exit)->unique()->count() < 2 => 'single_mark',
-                        default => 'matched',
-                    };
-
-                    return ['shift' => $shift, 'result' => $result];
-                });
-            }
+            $marks = $this->timekeeping->forShifts($punches->getCollection());
+            $punches->through(fn ($shift) => $this->timekeeping->match($shift, $marks));
         }
 
         $documents = null;

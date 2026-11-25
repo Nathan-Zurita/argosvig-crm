@@ -102,8 +102,10 @@ class TimekeepingImporter
                 ->whereIn('alterdata_employee_id', array_unique(array_column($validated, 'code')))
                 ->orderBy('id')->lockForUpdate()->pluck('id', 'alterdata_employee_id');
             $stamp = now();
+            $instants = array_column($validated, 'occurred_at');
             $batch = DB::table('hr_timekeeping_batches')->insertGetId([
                 'source' => $source, 'user_id' => $actor, 'received' => count($validated),
+                'first_mark_at' => min($instants), 'last_mark_at' => max($instants),
                 'created_at' => $stamp, 'updated_at' => $stamp,
             ]);
 

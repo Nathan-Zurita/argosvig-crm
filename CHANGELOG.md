@@ -4,6 +4,8 @@ This changelog consists of the bug & security fixes and new features being inclu
 
 ## **v2.2.9 (Upcoming)**
 
+* [enhancement] Added shift-based timekeeping review, daily results and import coverage, with a local demonstration dataset.
+
 * [enhancement] Added image previews, zoom, and individual removal before saving incident attachments.
 
 * [feature] Added multiple image attachments up to 20 MB each and a private gallery to operational incidents, with support for adding more images later.

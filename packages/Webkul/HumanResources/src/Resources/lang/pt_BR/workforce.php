@@ -79,6 +79,7 @@ return [
     ],
     'sources' => [
         'alterdata_csv' => 'CSV da Alterdata',
+        'demo' => 'Demonstração',
         'alterdata_api' => 'API da Alterdata',
     ],
     'move' => [
