@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Session\TokenMismatchException;
 use Illuminate\Validation\ValidationException;
 use PDOException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -50,6 +51,16 @@ class Handler extends ExceptionHandler
      */
     public function render($request, Throwable $exception)
     {
+        if ($exception instanceof TokenMismatchException && ! $request->expectsJson()) {
+            if ($request->routeIs('admin.session.store')) {
+                return redirect()->route('admin.session.create', status: 303);
+            }
+
+            if ($request->routeIs('admin.session.two_factor.verify')) {
+                return redirect()->route('admin.session.two_factor', status: 303);
+            }
+        }
+
         if (! config('app.debug')) {
             return $this->renderCustomResponse($exception);
         }
